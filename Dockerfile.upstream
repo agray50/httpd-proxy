@@ -1,0 +1,36 @@
+FROM httpd:2.4
+
+# The standard httpd image keeps everything under /usr/local/apache2.
+# Required modules are compiled in but commented out in httpd.conf — enable them here.
+# Also add an IncludeOptional for conf/conf.d/ so proxy.conf can be bind-mounted or
+# copied there without touching the main httpd.conf.
+#
+# Mount / volume paths (match proxy.conf):
+#   proxy.conf  → /usr/local/apache2/conf/conf.d/proxy.conf  (ConfigMap)
+#   server cert → /etc/httpd/ssl/server/tls.crt + tls.key    (Secret)
+#   client CA   → /etc/httpd/ssl/ca/ca.crt                   (Secret)
+#   backend CA  → /etc/httpd/ssl/backend-ca/ca.crt            (Secret, optional)
+#   proxy cert  → /etc/httpd/ssl/proxy-client/tls.crt + tls.key (Secret, optional)
+
+RUN sed -i \
+        -e 's|^#\(LoadModule ssl_module\)|\1|' \
+        -e 's|^#\(LoadModule socache_shmcb_module\)|\1|' \
+        -e 's|^#\(LoadModule proxy_module\)|\1|' \
+        -e 's|^#\(LoadModule proxy_http_module\)|\1|' \
+        -e 's|^#\(LoadModule headers_module\)|\1|' \
+        -e 's|^#\(LoadModule rewrite_module\)|\1|' \
+        /usr/local/apache2/conf/httpd.conf \
+    && echo 'IncludeOptional /usr/local/apache2/conf/conf.d/*.conf' \
+        >> /usr/local/apache2/conf/httpd.conf \
+    && mkdir -p \
+        /usr/local/apache2/conf/conf.d \
+        /etc/httpd/ssl/server \
+        /etc/httpd/ssl/ca \
+        /etc/httpd/ssl/backend-ca \
+        /etc/httpd/ssl/proxy-client
+
+# Only mTLS/HTTPS is exposed (port defined in proxy.conf via Listen 8443)
+EXPOSE 8443
+
+# httpd-foreground is the standard entrypoint script in this image
+CMD ["httpd-foreground"]
