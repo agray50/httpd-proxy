@@ -1,0 +1,146 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: httpd-proxy
+  namespace: your-namespace
+  labels:
+    app: httpd-proxy
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: httpd-proxy
+  template:
+    metadata:
+      labels:
+        app: httpd-proxy
+    spec:
+      # -----------------------------------------------------------------------
+      # OpenShift: do not run as root. The ubi9/httpd-24 image defaults to
+      # uid 1001 which already satisfies the restricted SCC.
+      # -----------------------------------------------------------------------
+      securityContext:
+        runAsNonRoot: true
+
+      containers:
+        - name: httpd-proxy
+          # Update this to your registry/image after building
+          image: your-registry/httpd-proxy:latest
+          imagePullPolicy: Always
+
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+
+          # ------------------------------------------------------------------
+          # Environment variables used in proxy.conf via ${VAR} substitution.
+          # Apache httpd 2.4+ resolves OS env vars in configuration files.
+          # ------------------------------------------------------------------
+          env:
+            # Must match the CN/SAN of the server certificate
+            - name: SERVER_NAME
+              value: "proxy.example.com"
+            # Backend Kubernetes service name (DNS resolves within the cluster)
+            - name: BACKEND_SERVICE_HOST
+              value: "backend-service"
+            - name: BACKEND_SERVICE_PORT
+              value: "8080"
+
+          volumeMounts:
+            # httpd configuration from ConfigMap
+            - name: httpd-config
+              mountPath: /etc/httpd/conf.d/proxy.conf
+              subPath: proxy.conf
+              readOnly: true
+
+            # Server TLS certificate and key (Secret: httpd-server-tls)
+            - name: server-tls
+              mountPath: /etc/httpd/ssl/server
+              readOnly: true
+
+            # CA certificate for client certificate verification (Secret: httpd-client-ca)
+            - name: client-ca
+              mountPath: /etc/httpd/ssl/ca
+              readOnly: true
+
+            # --- TLS to backend: uncomment when enabling SSLProxy* in proxy.conf ---
+            # - name: backend-ca
+            #   mountPath: /etc/httpd/ssl/backend-ca
+            #   readOnly: true
+
+            # --- mTLS to backend (optional): client cert httpd presents to backend ---
+            # - name: proxy-client-tls
+            #   mountPath: /etc/httpd/ssl/proxy-client
+            #   readOnly: true
+
+          # ------------------------------------------------------------------
+          # Probes
+          # tcpSocket is used because mTLS prevents plain HTTP health checks.
+          # For a dedicated health endpoint that bypasses mTLS add a
+          # <Location /health> block with SSLVerifyClient none to proxy.conf.
+          # ------------------------------------------------------------------
+          livenessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+
+          readinessProbe:
+            tcpSocket:
+              port: 8443
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false  # httpd writes runtime files under /run
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: httpd-config
+          configMap:
+            name: httpd-proxy-config
+
+        - name: server-tls
+          secret:
+            secretName: httpd-server-tls
+            defaultMode: 0440
+
+        - name: client-ca
+          secret:
+            secretName: httpd-client-ca
+            defaultMode: 0440
+
+        # --- TLS to backend: uncomment when enabling SSLProxy* in proxy.conf ---
+        # - name: backend-ca
+        #   secret:
+        #     secretName: httpd-backend-ca
+        #     defaultMode: 0440
+
+        # --- mTLS to backend (optional): client cert httpd presents to backend ---
+        # - name: proxy-client-tls
+        #   secret:
+        #     secretName: httpd-proxy-client-tls
+        #     defaultMode: 0440
+
+      # Spread replicas across nodes for availability
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: httpd-proxy

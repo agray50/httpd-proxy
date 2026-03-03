@@ -1,0 +1,31 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: httpd-proxy
+  namespace: your-namespace
+  labels:
+    app: httpd-proxy
+  annotations:
+    # Optional: hint to HAProxy router about the timeout for long-lived connections
+    haproxy.router.openshift.io/timeout: 300s
+spec:
+  # Set to the FQDN clients will connect to; must match the server certificate CN/SAN
+  host: proxy.example.com
+
+  to:
+    kind: Service
+    name: httpd-proxy
+    weight: 100
+
+  port:
+    # Must match the service port name
+    targetPort: https
+
+  tls:
+    # passthrough: OpenShift HAProxy forwards raw TCP to the pod without
+    # decrypting TLS. httpd handles TLS termination and mTLS verification.
+    termination: passthrough
+    # Disallow plain HTTP; clients must use HTTPS
+    insecureEdgeTerminationPolicy: None
+
+  wildcardPolicy: None

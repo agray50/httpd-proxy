@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: httpd-proxy
+  namespace: your-namespace
+  labels:
+    app: httpd-proxy
+spec:
+  type: ClusterIP
+  selector:
+    app: httpd-proxy
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
